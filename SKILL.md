@@ -71,6 +71,82 @@ Example: allow read/edit + bash:
 - Use `--permission-mode plan` when you want read-only planning.
 - Keep `--allowedTools` narrow (principle of least privilege), especially in automation.
 
+## High‑leverage Claude Code tips (from the official docs)
+
+### 1) Always give Claude a way to verify (tests/build/screenshots)
+
+Claude performs dramatically better when it can verify its work.
+Make verification explicit in the prompt, e.g.:
+- “Fix the bug **and run tests**. Done when `npm test` passes.”
+- “Implement UI change, **take a screenshot** and compare to this reference.”
+
+### 2) Explore → Plan → Implement (use Plan Mode)
+
+For multi-step work, start in plan mode to do safe, read-only analysis:
+```bash
+./scripts/claude_code_run.py -p "Analyze and propose a plan" --permission-mode plan
+```
+Then switch to execution (`acceptEdits`) once the plan is approved.
+
+### 3) Manage context aggressively: /clear and /compact
+
+Long, mixed-topic sessions degrade quality.
+- Use `/clear` between unrelated tasks.
+- Use `/compact Focus on <X>` when nearing limits to preserve the right details.
+
+### 4) Rewind aggressively: /rewind (checkpoints)
+
+Claude checkpoints before changes.
+If an approach is wrong, use `/rewind` (or Esc Esc) to restore:
+- conversation only
+- code only
+- both
+
+This enables “try something risky → rewind if wrong” loops.
+
+### 5) Prefer CLAUDE.md for durable rules; keep it short
+
+Best practice is a concise CLAUDE.md (global or per-project) for:
+- build/test commands Claude should use
+- repo etiquette / style rules that differ from defaults
+- non-obvious environment quirks
+
+Overlong CLAUDE.md files get ignored.
+
+### 6) Permissions: deny > ask > allow (and scope matters)
+
+In `.claude/settings.json` / `~/.claude/settings.json`, rules match in order:
+**deny first**, then ask, then allow.
+Use deny rules to block secrets (e.g. `.env`, `secrets/**`).
+
+### 7) Bash env vars don’t persist; use CLAUDE_ENV_FILE for persistence
+
+Each Bash tool call runs in a fresh shell; `export FOO=bar` won’t persist.
+If you need persistent env setup, set (before starting Claude Code):
+```bash
+export CLAUDE_ENV_FILE=/path/to/env-setup.sh
+```
+Claude will source it before each Bash command.
+
+### 8) Hooks beat “please remember” instructions
+
+Use hooks to enforce deterministic actions (format-on-edit, block writes to sensitive dirs, etc.)
+when you need guarantees.
+
+### 9) Use subagents for heavy investigation / independent review
+
+Subagents can read many files without polluting the main context.
+Use them for broad codebase research or post-implementation review.
+
+### 10) Treat Claude as a Unix utility (headless, pipes, structured output)
+
+Examples:
+```bash
+cat build-error.txt | claude -p "Explain root cause" 
+claude -p "List endpoints" --output-format json
+```
+This is ideal for CI and automation.
+
 ## Interactive mode (tmux)
 
 If your prompt contains lines starting with `/` (slash commands), the wrapper defaults to **auto → interactive**.
