@@ -24,7 +24,11 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_CLAUDE = os.environ.get("CLAUDE_CODE_BIN", "/home/ubuntu/.local/bin/claude")
+DEFAULT_CLAUDE = os.environ.get("CLAUDE_CODE_BIN") or ("/opt/homebrew/bin/claude" if Path("/opt/homebrew/bin/claude").exists() else None)
+
+# Fallback to PATH lookup if not found above.
+if DEFAULT_CLAUDE is None:
+    DEFAULT_CLAUDE = "claude"
 
 
 def which(name: str) -> str | None:
@@ -85,6 +89,15 @@ def build_headless_cmd(args: argparse.Namespace) -> list[str]:
 
 
 def run_with_pty(cmd: list[str], cwd: str | None) -> int:
+    """Run with a pseudo-terminal when possible.
+
+    OpenClaw runs subprocesses in a non-interactive context. On macOS, `/usr/bin/script`
+    may fail with `tcgetattr/ioctl: Operation not supported on socket`. In that case,
+    degrade gracefully to running the command directly.
+
+    Linux util-linux `script` supports `-c`; macOS (bsd) does not.
+    """
+
     cmd_str = " ".join(shlex.quote(c) for c in cmd)
 
     script_bin = which("script")
@@ -92,7 +105,23 @@ def run_with_pty(cmd: list[str], cwd: str | None) -> int:
         proc = subprocess.run(cmd, cwd=cwd, text=True)
         return proc.returncode
 
-    proc = subprocess.run([script_bin, "-q", "-c", cmd_str, "/dev/null"], cwd=cwd, text=True)
+    # Prefer macOS/bsd invocation first.
+    res = subprocess.run([script_bin, "-q", "/dev/null"] + cmd, cwd=cwd, text=True, capture_output=True)
+    if res.returncode == 0:
+        return 0
+
+    err = (res.stderr or "")
+    if "tcgetattr/ioctl" in err:
+        proc = subprocess.run(cmd, cwd=cwd, text=True)
+        return proc.returncode
+
+    # Try util-linux style.
+    res2 = subprocess.run([script_bin, "-q", "-c", cmd_str, "/dev/null"], cwd=cwd, text=True, capture_output=True)
+    if res2.returncode == 0:
+        return 0
+
+    # Final fallback.
+    proc = subprocess.run(cmd, cwd=cwd, text=True)
     return proc.returncode
 
 
@@ -143,6 +172,9 @@ def run_interactive_tmux(args: argparse.Namespace) -> int:
         claude_parts += ["--permission-mode", args.permission_mode]
     if args.allowedTools:
         claude_parts += ["--allowedTools", args.allowedTools]
+
+    # Allow selecting model in interactive mode via extra args, e.g. `-- --model sonnet`.
+    # (Claude Code supports `--model <alias|full-name>`.)
     if args.append_system_prompt:
         claude_parts += ["--append-system-prompt", args.append_system_prompt]
     if args.system_prompt:
